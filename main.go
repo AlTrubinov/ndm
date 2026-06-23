@@ -10,7 +10,8 @@ import (
 )
 
 type waiter struct {
-	ch chan string
+	ch  chan struct{}
+	msg string
 }
 
 type queue struct {
@@ -45,7 +46,8 @@ func (b *broker) put(name, msg string) {
 	if len(q.waiters) > 0 {
 		w := q.waiters[0]
 		q.waiters = q.waiters[1:]
-		w.ch <- msg
+		w.msg = msg
+		close(w.ch)
 		return
 	}
 
@@ -69,7 +71,7 @@ func (b *broker) get(name string, timeout time.Duration, wait bool, done <-chan 
 		return "", false
 	}
 
-	w := &waiter{ch: make(chan string, 1)}
+	w := &waiter{ch: make(chan struct{})}
 	q.waiters = append(q.waiters, w)
 	b.mu.Unlock()
 
@@ -77,20 +79,20 @@ func (b *broker) get(name string, timeout time.Duration, wait bool, done <-chan 
 	defer timer.Stop()
 
 	select {
-	case msg := <-w.ch:
-		return msg, true
+	case <-w.ch:
+		return w.msg, true
 
 	case <-timer.C:
-		if !b.removeWaiter(name, w) {
-			return <-w.ch, true
+		if b.removeWaiter(name, w) {
+			return "", false
 		}
-		return "", false
+		return w.msg, true
 
 	case <-done:
-		if !b.removeWaiter(name, w) {
-			return <-w.ch, true
+		if b.removeWaiter(name, w) {
+			return "", false
 		}
-		return "", false
+		return w.msg, true
 	}
 }
 
