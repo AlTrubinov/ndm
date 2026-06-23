@@ -81,35 +81,41 @@ func (b *broker) get(name string, timeout time.Duration, wait bool, done <-chan 
 		return msg, true
 
 	case <-timer.C:
-		b.removeWaiter(name, w)
+		if !b.removeWaiter(name, w) {
+			return <-w.ch, true
+		}
 		return "", false
 
 	case <-done:
-		b.removeWaiter(name, w)
+		if !b.removeWaiter(name, w) {
+			return <-w.ch, true
+		}
 		return "", false
 	}
 }
 
-func (b *broker) removeWaiter(name string, target *waiter) {
+func (b *broker) removeWaiter(name string, target *waiter) bool {
 	b.mu.Lock()
 	defer b.mu.Unlock()
 
 	q := b.queues[name]
 	if q == nil {
-		return
+		return false
 	}
 
 	for i, w := range q.waiters {
 		if w == target {
 			q.waiters = append(q.waiters[:i], q.waiters[i+1:]...)
-			return
+			return true
 		}
 	}
+
+	return false
 }
 
 func main() {
 	if len(os.Args) != 2 {
-		fmt.Fprintln(os.Stderr, "usage: queue-broker <port>")
+		fmt.Fprintln(os.Stderr, "usage: go run main.go <port>")
 		os.Exit(1)
 	}
 
